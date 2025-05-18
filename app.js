@@ -1,76 +1,71 @@
-// Importar los módulos necesarios
 const express = require('express');
-const helmet = require('helmet');
 const session = require('express-session');
 const path = require('path');
 
 const app = express();
 
-// Añadir cabeceras de seguridad con helmet
-app.use(helmet());
-
-// Middleware para parsear JSON y formularios
+// ¡NO USAMOS HELMET! (sin cabeceras de seguridad)
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Configurar sesiones de usuario (en memoria para la demo)
+// Sesión insegura: secreto débil y httpOnly desactivado
 app.use(session({
-    secret: 'secret-key-segura',         // Cambia este valor en producción
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, secure: false } // Usa 'secure: true' si tienes HTTPS
+    secret: '123', // Secreto predecible
+    resave: true,
+    saveUninitialized: true,
+    cookie: { httpOnly: false, secure: false }
 }));
 
 // Servir archivos estáticos de la carpeta public
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Objeto para guardar las tareas de cada usuario (en memoria, solo para demo)
+// Objeto global para guardar tareas (todas juntas, sin aislamiento)
 const tasks = {}; // { sessionID: [ {id, text} ] }
 
-// "Login" muy básico: cualquier usuario puede iniciar sesión como demo
+// --- VULNERABILIDAD 1: Sin control de autenticación ---
+// --- VULNERABILIDAD 2: Sin validación ni sanitización de XSS ---
+// --- VULNERABILIDAD 3: Exposición de todas las tareas a cualquiera ---
+
+// "Login" demo (realmente no lo necesitas, pero lo dejo por compatibilidad con el frontend)
 app.post('/login', (req, res) => {
     req.session.user = 'demo';
-    // Inicializar el array de tareas para la sesión si no existe
     if (!tasks[req.session.id]) tasks[req.session.id] = [];
     res.json({ ok: true });
 });
 
-// Logout: destruye la sesión del usuario
+// Cerrar sesión (demo)
 app.get('/logout', (req, res) => {
     req.session.destroy(() => res.redirect('/'));
 });
 
-// Obtener las tareas del usuario logueado
+// Obtener todas las tareas de todos los usuarios (fuga masiva de datos)
 app.get('/api/tasks', (req, res) => {
-    if (!req.session.user) return res.status(401).json({ error: 'No autorizado' });
-    res.json(tasks[req.session.id] || []);
+    // ¡Ya no hay control de sesión!
+    let todas = [];
+    Object.values(tasks).forEach(arr => todas = todas.concat(arr));
+    res.json(todas);
 });
 
-// Añadir una nueva tarea a la lista
+// Añadir tarea sin ningún control ni sanitización
 app.post('/api/tasks', (req, res) => {
-    if (!req.session.user) return res.status(401).json({ error: 'No autorizado' });
     const { text } = req.body;
-    // Validar la entrada del usuario (evita XSS y errores)
-    if (!text || typeof text !== 'string' || text.length > 100) {
-        return res.status(400).json({ error: 'Texto inválido' });
-    }
-    // Sanitizar el texto para evitar scripts (XSS)
-    const safeText = text.replace(/[<>&'"]/g, c => (
-        { '<':'&lt;','>':'&gt;','&':'&amp;',"'":'&#39;','"':'&quot;' }[c]
-    ));
-    const task = { id: Date.now(), text: safeText };
+    // Permite cualquier cosa, incluso <script>alert(1)</script>
+    if (!tasks[req.session.id]) tasks[req.session.id] = [];
+    const task = { id: Date.now(), text };
     tasks[req.session.id].push(task);
     res.json(task);
 });
 
-// Eliminar una tarea por ID
+// Eliminar tarea de todos los usuarios (no seguro)
 app.delete('/api/tasks/:id', (req, res) => {
-    if (!req.session.user) return res.status(401).json({ error: 'No autorizado' });
-    tasks[req.session.id] = (tasks[req.session.id] || []).filter(task => task.id != req.params.id);
+    // Busca y borra la tarea en todas las sesiones (vulnerable)
+    Object.values(tasks).forEach(arr => {
+        const i = arr.findIndex(task => task.id == req.params.id);
+        if (i !== -1) arr.splice(i, 1);
+    });
     res.json({ ok: true });
 });
 
-// Iniciar el servidor en el puerto 3000
+// Escuchar en el puerto para Render/Heroku/etc.
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`App segura en http://localhost:${PORT}`));
-
+app.listen(PORT, () => console.log(`App VULNERABLE corriendo en http://localhost:${PORT}`));
