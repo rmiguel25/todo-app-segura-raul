@@ -1,0 +1,11 @@
+{
+  "name": "app-secura-raul-tarea-4",
+  "version": "1.0.0",
+  "main": "app.js",
+  "description": "Aplicación To-Do segura con Node.js y Express",
+  "dependencies": {
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "express-session": "^1.17.3"
+  }
+}
